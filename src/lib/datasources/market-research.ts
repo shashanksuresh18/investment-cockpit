@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { createAnthropicClient } from '@/lib/anthropic-client';
 import type {
   ApiResult,
   MarketResearch,
@@ -9,7 +9,9 @@ import type {
   ExaDeepData,
 } from '@/lib/types';
 
-const client = new Anthropic();
+const client = createAnthropicClient();
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+const DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 
 function buildMarketContext(
   company: string,
@@ -166,22 +168,16 @@ export async function fetchMarketResearch(
 
   const context = buildMarketContext(company, ticker, fmp, finnhub, sec, exaDeep);
 
-  try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
-      system:
-        'You are a senior sector analyst at a top-tier investment bank. Produce structured market research from available data. Do not fabricate numbers — mark as "N/A" if unknown. Return only a JSON object in ```json``` fences.',
-      messages: [
-        {
-          role: 'user',
-          content: `Produce structured market research for ${company} using the data below.
+  const marketSystem =
+    'You are a senior sector analyst at a top-tier investment bank. Produce structured market research from available data. Do not fabricate numbers - mark as "N/A" if unknown. If source data is thin, produce a short honest output. A short accurate response is better than a long fabricated one. Return only a JSON object in ```json``` fences.';
+
+  const marketPrompt = `Produce structured market research for ${company} using the data below.
 
 Return a JSON object with EXACTLY these fields:
 
 {
   "sector": "<sector name, e.g. Fintech / Payments>",
-  "sectorOverview": "<2-3 sentence industry backdrop — size, growth rate, key dynamics>",
+  "sectorOverview": "For sector size, growth rate, and market dynamics: report ONLY figures explicitly present in the source data below. If any of these are absent from the input, write exactly 'N/A - not in source data' for that field. Do not use general knowledge to fill gaps.",
   "competitiveLandscape": "<2-3 sentences on who the key players are and how they compete>",
   "positioningVsPeers": "<2-3 sentences on how ${company} is positioned vs competitors — differentiation, moat, weakness>",
   "tradingComps": [
@@ -202,17 +198,52 @@ Return a JSON object with EXACTLY these fields:
 }
 
 DATA:
-${context}`,
-        },
-      ],
-    });
+${context}`;
 
-    const content = response.content[0];
-    if (content?.type !== 'text') {
-      return { success: false, error: 'Claude returned non-text response' };
+  try {
+    let responseText: string;
+
+    if (DEEPSEEK_API_KEY) {
+      // DeepSeek V3 — 10x cheaper for intermediate layers
+      const dsResponse = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'system', content: marketSystem },
+            { role: 'user', content: marketPrompt },
+          ],
+          max_tokens: 4096,
+        }),
+      });
+      if (!dsResponse.ok) {
+        const errText = await dsResponse.text();
+        throw new Error(`DeepSeek error ${dsResponse.status}: ${errText}`);
+      }
+      const dsJson = (await dsResponse.json()) as {
+        choices: Array<{ message: { content: string } }>;
+      };
+      responseText = dsJson.choices[0]?.message?.content ?? '';
+    } else {
+      // Fallback to Anthropic claude-sonnet-4-6
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        system: marketSystem,
+        messages: [{ role: 'user', content: marketPrompt }],
+      });
+      const content = response.content[0];
+      if (content?.type !== 'text') {
+        return { success: false, error: 'Claude returned non-text response' };
+      }
+      responseText = content.text;
     }
 
-    const research = parseMarketResearch(content.text);
+    const research = parseMarketResearch(responseText);
     if (research === null) {
       return { success: false, error: 'Could not parse market research JSON' };
     }
@@ -221,7 +252,7 @@ ${context}`,
   } catch (error: unknown) {
     return {
       success: false,
-      error: `Market research Claude call failed: ${String(error)}`,
+      error: `Market research call failed: ${String(error)}`,
     };
   }
 }

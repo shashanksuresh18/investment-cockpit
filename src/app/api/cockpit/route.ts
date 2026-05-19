@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCockpitReport } from '@/lib/cockpit-report-service';
 import type { CockpitRequest, CockpitResponse } from '@/lib/types';
 
+// Allow up to 5 minutes for synthesis (Opus-4 with large prompts)
+export const maxDuration = 300;
+
 function validateRequest(body: unknown): body is CockpitRequest {
   if (typeof body !== 'object' || body === null) return false;
   const record = body as Record<string, unknown>;

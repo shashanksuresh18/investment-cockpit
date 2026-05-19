@@ -65,7 +65,26 @@ export async function getCockpitReport(company: string): Promise<{
 
   const cockpitData = await runCockpitEngine(company);
   const report = await synthesizeCockpit(cockpitData);
-  await setCachedReport(companyId, report);
+
+  const isThinReport =
+    report.fullMemo.length < 3000 ||
+    report.scenarios.length < 4 ||
+    report.sourceLibrary.length === 0;
+
+  if (isThinReport) {
+    console.warn(
+      '[cockpit-service] Quality gate: thin synthesis result — fullMemo:',
+      report.fullMemo.length,
+      'scenarios:',
+      report.scenarios.length,
+      'sources:',
+      report.sourceLibrary.length,
+      '— not caching; retry with more IR docs'
+    );
+    // Do not cache thin results — return them but warn
+  } else {
+    await setCachedReport(companyId, report);
+  }
 
   return { report, cached: false };
 }

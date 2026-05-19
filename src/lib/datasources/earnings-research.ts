@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { createAnthropicClient } from '@/lib/anthropic-client';
 import type {
   ApiResult,
   EarningsAnalysis,
@@ -14,7 +14,9 @@ import {
   extractLatestFact,
 } from '@/lib/datasources/sec-edgar';
 
-const client = new Anthropic();
+const client = createAnthropicClient();
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+const DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 
 function buildEarningsContext(
   company: string,
@@ -193,16 +195,7 @@ export async function fetchEarningsAnalysis(
     };
   }
 
-  try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
-      system:
-        'You are a senior equity research analyst. Produce structured earnings analysis. Only use numbers explicitly present in the data. Never fabricate. Return only a JSON object in ```json``` fences.',
-      messages: [
-        {
-          role: 'user',
-          content: `Analyze the most recent available earnings period for ${company} using the data below. Produce a JSON object with EXACTLY these fields:
+  const earningsPrompt = `Analyze the most recent available earnings period for ${company} using the data below. Produce a JSON object with EXACTLY these fields:
 
 {
   "period": "<e.g. Q4 2025 or FY2024>",
@@ -222,17 +215,55 @@ export async function fetchEarningsAnalysis(
 }
 
 DATA:
-${context}`,
-        },
-      ],
-    });
+${context}`;
 
-    const content = response.content[0];
-    if (content?.type !== 'text') {
-      return { success: false, error: 'Claude returned non-text response' };
+  const earningsSystem =
+    'You are a senior equity research analyst. Produce structured earnings analysis. Only use numbers explicitly present in the data. Never fabricate. Return only a JSON object in ```json``` fences.';
+
+  try {
+    let responseText: string;
+
+    if (DEEPSEEK_API_KEY) {
+      // DeepSeek V3 — 10x cheaper for intermediate layers
+      const dsResponse = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'system', content: earningsSystem },
+            { role: 'user', content: earningsPrompt },
+          ],
+          max_tokens: 4096,
+        }),
+      });
+      if (!dsResponse.ok) {
+        const errText = await dsResponse.text();
+        throw new Error(`DeepSeek error ${dsResponse.status}: ${errText}`);
+      }
+      const dsJson = (await dsResponse.json()) as {
+        choices: Array<{ message: { content: string } }>;
+      };
+      responseText = dsJson.choices[0]?.message?.content ?? '';
+    } else {
+      // Fallback to Anthropic claude-sonnet-4-6
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        system: earningsSystem,
+        messages: [{ role: 'user', content: earningsPrompt }],
+      });
+      const content = response.content[0];
+      if (content?.type !== 'text') {
+        return { success: false, error: 'Claude returned non-text response' };
+      }
+      responseText = content.text;
     }
 
-    const analysis = parseEarningsAnalysis(content.text);
+    const analysis = parseEarningsAnalysis(responseText);
     if (analysis === null) {
       return { success: false, error: 'Could not parse earnings analysis JSON' };
     }
@@ -241,7 +272,7 @@ ${context}`,
   } catch (error: unknown) {
     return {
       success: false,
-      error: `Earnings analysis Claude call failed: ${String(error)}`,
+      error: `Earnings analysis call failed: ${String(error)}`,
     };
   }
 }
