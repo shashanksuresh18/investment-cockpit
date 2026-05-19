@@ -1,0 +1,17 @@
+.claude/
+node_modules/
+.next/
+.env.local
+.env*.local
+prisma/dev.db
+prisma/dev.db-shm
+prisma/dev.db-wal
+*.db
+*.db-shm
+*.db-wal
+.turbo/
+out/
+dist/
+coverage/
+.DS_Store
+Thumbs.db

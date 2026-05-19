@@ -1,0 +1,36 @@
+{
+  "name": "investment-cockpit",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.87",
+    "@libsql/client": "^0.17",
+    "@prisma/adapter-libsql": "^7.8.0",
+    "@prisma/client": "^7",
+    "exa-js": "^2.11",
+    "next": "15",
+    "prisma": "^7",
+    "react": "19",
+    "react-dom": "19"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "^15",
+    "prettier": "^3",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
