@@ -572,6 +572,8 @@ export type CockpitData = {
   readonly exaDeep: ExaDeepData | null;
   readonly irDocuments: readonly IRDocument[];
   readonly pdfExtracts: readonly PDFExtract[];
+  readonly earningsAnalysis: EarningsAnalysis | null;
+  readonly marketResearch: MarketResearch | null;
   readonly dataConfidenceClass: DataConfidenceClass;
 };
 
@@ -655,4 +657,44 @@ export type SourceLibraryProps = {
 
 export type FullMemoProps = {
   readonly memo: string;
+};
+
+// ── Skill-layer research types ────────────────────────────────────────────────
+
+export type EarningsAnalysis = {
+  readonly period: string;
+  readonly revenueActual: number | null;
+  readonly revenueEstimate: number | null;
+  readonly revenueBeatMiss: 'beat' | 'miss' | 'in-line' | null;
+  readonly epsActual: number | null;
+  readonly epsEstimate: number | null;
+  readonly epsBeatMiss: 'beat' | 'miss' | 'in-line' | null;
+  readonly keyMetrics: Record<string, string>;
+  readonly managementCommentary: string;
+  readonly analystTake: string;
+  readonly updatedOutlook: string;
+  readonly guidanceRevision: 'raised' | 'lowered' | 'maintained' | 'none' | null;
+  readonly riskFlags: readonly string[];
+  readonly sourcedFrom: readonly string[];
+};
+
+export type SectorComp = {
+  readonly ticker: string;
+  readonly name: string;
+  readonly evRevenue: string | null;
+  readonly evEbitda: string | null;
+  readonly pe: string | null;
+  readonly revenueGrowth: string | null;
+  readonly note: string;
+};
+
+export type MarketResearch = {
+  readonly sector: string;
+  readonly sectorOverview: string;
+  readonly competitiveLandscape: string;
+  readonly positioningVsPeers: string;
+  readonly tradingComps: readonly SectorComp[];
+  readonly thematicTailwinds: readonly string[];
+  readonly thematicHeadwinds: readonly string[];
+  readonly sourcedFrom: readonly string[];
 };

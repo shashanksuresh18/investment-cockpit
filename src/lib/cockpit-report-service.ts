@@ -22,7 +22,12 @@ async function getCachedReport(companyId: string): Promise<CockpitReport | null>
     if (row === null) return null;
     if (!isCacheValid(row.updatedAt)) return null;
 
-    return JSON.parse(row.data) as CockpitReport;
+    const report = JSON.parse(row.data) as CockpitReport;
+    if (report.fullMemo.includes('Analysis memo not available due to data synthesis error')) {
+      return null;
+    }
+
+    return report;
   } catch (error: unknown) {
     console.error("[cockpit-service] cache read failed", { companyId, error: String(error) });
     return null;

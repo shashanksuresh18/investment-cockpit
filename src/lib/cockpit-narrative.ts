@@ -26,7 +26,6 @@ import {
 } from '@/lib/datasources/sec-edgar';
 
 const client = new Anthropic();
-
 function formatMillions(value: number | null, suffix = ''): string {
   if (value === null) return 'N/A';
   const abs = Math.abs(value);
@@ -218,6 +217,187 @@ function buildNewsSnippet(data: CockpitData): string {
     .join('\n');
 }
 
+function buildEarningsAnalysisSummary(data: CockpitData): string {
+  const { earningsAnalysis } = data;
+  if (!earningsAnalysis) return 'No pre-analyzed earnings data available.';
+
+  const parts: string[] = [`Period: ${earningsAnalysis.period}`];
+
+  if (earningsAnalysis.revenueBeatMiss !== null) {
+    const rev = earningsAnalysis.revenueActual !== null
+      ? `$${earningsAnalysis.revenueActual.toFixed(0)}M`
+      : 'N/A';
+    const est = earningsAnalysis.revenueEstimate !== null
+      ? `$${earningsAnalysis.revenueEstimate.toFixed(0)}M`
+      : 'N/A';
+    parts.push(`Revenue: ${rev} vs ${est} est → ${earningsAnalysis.revenueBeatMiss.toUpperCase()} [Earnings Analysis]`);
+  }
+
+  if (earningsAnalysis.epsBeatMiss !== null) {
+    const eps = earningsAnalysis.epsActual !== null
+      ? `$${earningsAnalysis.epsActual.toFixed(2)}`
+      : 'N/A';
+    const est = earningsAnalysis.epsEstimate !== null
+      ? `$${earningsAnalysis.epsEstimate.toFixed(2)}`
+      : 'N/A';
+    parts.push(`EPS: ${eps} vs ${est} est → ${earningsAnalysis.epsBeatMiss.toUpperCase()} [Earnings Analysis]`);
+  }
+
+  if (earningsAnalysis.guidanceRevision && earningsAnalysis.guidanceRevision !== 'none') {
+    parts.push(`Guidance: ${earningsAnalysis.guidanceRevision.toUpperCase()} [Earnings Analysis]`);
+  }
+
+  const metrics = Object.entries(earningsAnalysis.keyMetrics)
+    .slice(0, 6)
+    .map(([k, v]) => `  ${k}: ${v}`);
+  if (metrics.length > 0) {
+    parts.push(`Key metrics:\n${metrics.join('\n')} [Earnings Analysis]`);
+  }
+
+  if (earningsAnalysis.managementCommentary) {
+    parts.push(`Management: ${earningsAnalysis.managementCommentary}`);
+  }
+  if (earningsAnalysis.analystTake) {
+    parts.push(`Analyst take: ${earningsAnalysis.analystTake}`);
+  }
+  if (earningsAnalysis.updatedOutlook) {
+    parts.push(`Outlook: ${earningsAnalysis.updatedOutlook}`);
+  }
+  if (earningsAnalysis.riskFlags.length > 0) {
+    parts.push(`Risk flags: ${earningsAnalysis.riskFlags.join('; ')}`);
+  }
+
+  return parts.join('\n');
+}
+
+function buildMarketResearchSummary(data: CockpitData): string {
+  const { marketResearch } = data;
+  if (!marketResearch) return 'No pre-analyzed market research available.';
+
+  const parts: string[] = [
+    `Sector: ${marketResearch.sector}`,
+    `Overview: ${marketResearch.sectorOverview} [Market Research]`,
+    `Competitive landscape: ${marketResearch.competitiveLandscape} [Market Research]`,
+    `Positioning vs peers: ${marketResearch.positioningVsPeers} [Market Research]`,
+  ];
+
+  if (marketResearch.tradingComps.length > 0) {
+    const header = 'Sector trading comps [Market Research]:';
+    const rows = marketResearch.tradingComps.map(
+      (c) =>
+        `  ${c.ticker} (${c.name}): EV/Rev=${c.evRevenue ?? 'N/A'} EV/EBITDA=${c.evEbitda ?? 'N/A'} PE=${c.pe ?? 'N/A'} RevGrowth=${c.revenueGrowth ?? 'N/A'} — ${c.note}`
+    );
+    parts.push([header, ...rows].join('\n'));
+  }
+
+  if (marketResearch.thematicTailwinds.length > 0) {
+    parts.push(`Tailwinds: ${marketResearch.thematicTailwinds.join('; ')} [Market Research]`);
+  }
+  if (marketResearch.thematicHeadwinds.length > 0) {
+    parts.push(`Headwinds: ${marketResearch.thematicHeadwinds.join('; ')} [Market Research]`);
+  }
+
+  return parts.join('\n');
+}
+
+function buildFallbackFullMemo(
+  data: CockpitData,
+  scores: CockpitScores,
+  valuation: ValuationData | null,
+  analystConsensus: AnalystConsensus | null,
+  peerComps: readonly PeerComp[]
+): string {
+  const price = data.price !== null ? `$${data.price.toFixed(2)} [Finnhub]` : 'not available';
+  const verdict = data.dataConfidenceClass === 'high' ? 'Watch' : 'Avoid';
+  const marketCap =
+    valuation?.marketCap !== null && valuation?.marketCap !== undefined
+      ? `$${(valuation.marketCap / 1_000_000_000).toFixed(1)}B [Finnhub/FMP]`
+      : 'not available';
+  const consensus =
+    analystConsensus !== null
+      ? `${analystConsensus.strongBuy + analystConsensus.buy} buy / ${analystConsensus.hold} hold / ${analystConsensus.sell + analystConsensus.strongSell} sell [Finnhub]`
+      : 'not available';
+  const peerLine =
+    peerComps.length > 0
+      ? peerComps
+          .slice(0, 5)
+          .map((peer) => `${peer.ticker} (${peer.companyName})`)
+          .join(', ')
+      : 'not available';
+
+  return `### 1. Executive Summary / Final Call
+Verdict: ${verdict}. Price is ${price}. This memo was generated from structured source data because the narrative synthesis service did not return a complete memo.
+
+- Data confidence is ${scores.dataConfidence.score}/100: ${scores.dataConfidence.detail}
+- Source freshness is ${scores.sourceFreshness.score}/100: ${scores.sourceFreshness.detail}
+- Conviction is ${scores.conviction.score}/100: ${scores.conviction.detail}
+
+### 2. What Changed This Quarter
+Quarterly change analysis is not available from the structured data currently cached. Latest price/source reference: ${data.priceAsOf ?? 'not available'} / ${data.lastCoreSourceDate ?? 'not available'}.
+
+### 3. The Real Market Debate
+The core debate is whether the available public-market data is deep enough to underwrite the equity view. Analyst recommendations are available, but detailed operating drivers, guidance bridge, and peer multiples are incomplete.
+
+### 4. Market Likes / Market Dislikes
+Market likes:
+- Analyst distribution: ${consensus}
+- Freshness: ${scores.sourceFreshness.detail}
+
+Market dislikes:
+- Several valuation and operating metrics are not available.
+- The full narrative synthesis did not complete, so qualitative detail is limited.
+
+### 5. Key Financial Snapshot
+| Metric | Value |
+| --- | --- |
+| Price | ${price} |
+| Market cap | ${marketCap} |
+| 52-week high | ${valuation?.week52High !== null && valuation?.week52High !== undefined ? `$${valuation.week52High.toFixed(2)} [Finnhub]` : 'not available'} |
+| 52-week low | ${valuation?.week52Low !== null && valuation?.week52Low !== undefined ? `$${valuation.week52Low.toFixed(2)} [Finnhub]` : 'not available'} |
+| EV/Revenue | ${valuation?.evRevenue !== null && valuation?.evRevenue !== undefined ? `${valuation.evRevenue.toFixed(1)}x [FMP]` : 'not available'} |
+| EV/EBITDA | ${valuation?.evEbitda !== null && valuation?.evEbitda !== undefined ? `${valuation.evEbitda.toFixed(1)}x [FMP]` : 'not available'} |
+| P/E | ${valuation?.pe !== null && valuation?.pe !== undefined ? `${valuation.pe.toFixed(1)}x [FMP/Finnhub]` : 'not available'} |
+
+### 6. Credit / Unit Economics
+Credit and unit economics are not available in the structured data. For a fintech analysis, key missing items are take rate, loss rate, funding cost, delinquency trends, and contribution margin.
+
+### 7. What Is Priced In
+At the current price, the market appears to be pricing a still-contested growth and profitability path. Exact implied growth/margin assumptions cannot be calculated without reliable forward revenue, EBITDA, and earnings estimates.
+
+### 8. Bull / Base / Bear / Kill Case
+Bull case: Analyst sentiment remains constructive and source freshness is high, supporting a view that the market may reward execution if operating data improves.
+
+Base case: Maintain a Watch stance until fuller financial disclosure, forward estimates, and peer comparables are available.
+
+Bear case: Limited operating detail and incomplete valuation multiples make the equity harder to underwrite with confidence.
+
+Kill case: Permanent impairment would require evidence that growth, credit quality, or funding economics are structurally weaker than the market expects; the current dataset does not prove that.
+
+### 9. Peer / Competitor Framing
+Peer data: ${peerLine}. Current peer comp rows are incomplete, so valuation comparison should be treated as provisional.
+
+### 10. Catalysts and Watch Items
+0-90 days:
+- Next earnings or trading update.
+- Updated analyst price targets.
+- Fresh filing or IR document with revenue, margin, and credit metrics.
+
+3-6 months:
+- Evidence of durable profitability.
+- Better peer valuation disclosure.
+- Changes in analyst recommendation balance.
+
+### 11. Risks
+1. Missing data risk: key operating and valuation fields are unavailable.
+2. Narrative risk: the LLM narrative synthesis did not complete for this cached report.
+3. Market risk: price action may remain volatile without clearer forward estimates.
+
+### 12. Source Freshness and Missing Data
+Data confidence class: ${data.dataConfidenceClass}. ${scores.dataConfidence.detail}
+
+Missing data includes detailed income statement history, guidance bridge, forward consensus estimates, unit economics, and complete peer multiples.`;
+}
+
 function buildFullPrompt(data: CockpitData, scores: CockpitScores): string {
   const company = data.company;
   const ticker = data.ticker ?? 'Private/Unknown';
@@ -258,6 +438,12 @@ ${buildExaDeepSummary(data)}
 
 ### IR Documents & PDF Extracts
 ${buildIRDocSummary(data)}
+
+### Earnings Analysis [Pre-analyzed — Equity Research Skill Layer]
+${buildEarningsAnalysisSummary(data)}
+
+### Market Research [Pre-analyzed — Market Researcher Skill Layer]
+${buildMarketResearchSummary(data)}
 
 ### Recent News [Finnhub]
 ${buildNewsSnippet(data)}
@@ -618,14 +804,14 @@ export async function synthesizeCockpit(data: CockpitData): Promise<CockpitRepor
   const missingData = isStringArray(parsed['missingData']) ? parsed['missingData'] : [];
   const nextCatalyst = parseNextCatalyst(parsed['nextCatalyst']);
   const sourceLibrary = parseSourceLibrary(parsed['sourceLibrary']);
-  const fullMemo =
-    typeof parsed['fullMemo'] === 'string'
-      ? parsed['fullMemo']
-      : '*Analysis memo not available due to data synthesis error.*';
-
   const valuation = buildValuationData(data);
   const peerComps = buildPeerComps(data);
   const analystConsensus = buildAnalystConsensus(data);
+
+  const fullMemo =
+    typeof parsed['fullMemo'] === 'string'
+      ? parsed['fullMemo']
+      : buildFallbackFullMemo(data, scores, valuation, analystConsensus, peerComps);
 
   return {
     company: data.company,

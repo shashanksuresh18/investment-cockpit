@@ -4,6 +4,8 @@ import { fetchSecEdgarData } from '@/lib/datasources/sec-edgar';
 import { fetchCompaniesHouseData } from '@/lib/datasources/companies-house';
 import { fetchGleifData } from '@/lib/datasources/gleif';
 import { fetchExaDeepData } from '@/lib/datasources/exa-deep';
+import { fetchEarningsAnalysis } from '@/lib/datasources/earnings-research';
+import { fetchMarketResearch } from '@/lib/datasources/market-research';
 import { findIRDocuments } from '@/lib/ir-documents';
 import { analyzeIRDocuments } from '@/lib/pdf-analyzer';
 import { deriveDataConfidenceClass } from '@/lib/confidence';
@@ -18,6 +20,8 @@ import type {
   IRDocument,
   PDFExtract,
   DataConfidenceClass,
+  EarningsAnalysis,
+  MarketResearch,
 } from '@/lib/types';
 
 type WaterfallResult = {
@@ -211,6 +215,53 @@ export async function runCockpitEngine(query: string): Promise<CockpitData> {
 
   const lastCoreSourceDate = resolveLastCoreSourceDate(waterfall, irDocuments);
 
+  let earningsAnalysis: EarningsAnalysis | null = null;
+  let marketResearch: MarketResearch | null = null;
+
+  const [earningsResult, marketResult] = await Promise.allSettled([
+    fetchEarningsAnalysis(
+      identity.company,
+      identity.ticker,
+      waterfall.finnhub,
+      waterfall.fmp,
+      waterfall.sec,
+      irDocuments,
+      pdfExtracts
+    ),
+    fetchMarketResearch(
+      identity.company,
+      identity.ticker,
+      waterfall.fmp,
+      waterfall.finnhub,
+      waterfall.sec,
+      waterfall.exaDeep
+    ),
+  ]);
+
+  if (earningsResult.status === 'fulfilled' && earningsResult.value.success) {
+    earningsAnalysis = earningsResult.value.data;
+  } else {
+    const earningsError =
+      earningsResult.status === 'rejected'
+        ? String(earningsResult.reason)
+        : !earningsResult.value.success
+          ? earningsResult.value.error
+          : 'unknown';
+    console.error('[engine] earnings analysis failed', { error: earningsError });
+  }
+
+  if (marketResult.status === 'fulfilled' && marketResult.value.success) {
+    marketResearch = marketResult.value.data;
+  } else {
+    const marketError =
+      marketResult.status === 'rejected'
+        ? String(marketResult.reason)
+        : !marketResult.value.success
+          ? marketResult.value.error
+          : 'unknown';
+    console.error('[engine] market research failed', { error: marketError });
+  }
+
   return {
     company: identity.company,
     ticker: identity.ticker,
@@ -226,6 +277,8 @@ export async function runCockpitEngine(query: string): Promise<CockpitData> {
     exaDeep: waterfall.exaDeep,
     irDocuments,
     pdfExtracts,
+    earningsAnalysis,
+    marketResearch,
     dataConfidenceClass,
   };
 }
