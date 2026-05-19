@@ -13,6 +13,24 @@ function isCacheValid(updatedAt: Date): boolean {
   return Date.now() - updatedAt.getTime() < CACHE_TTL_MS;
 }
 
+function isCachedReportUsable(report: CockpitReport): boolean {
+  if (report.kpiBand.length === 0) return false;
+  if (report.scenarios.length < 4) return false;
+  if (report.sourceLibrary.length === 0) return false;
+  if (report.thesisQuadrant.marketLikes.length === 0) return false;
+  if (report.fullMemo.length < 3000) return false;
+  return true;
+}
+
+async function deleteCachedReport(companyId: string): Promise<void> {
+  try {
+    await prisma.cockpitCache.delete({ where: { companyId } });
+    console.warn('[cockpit-service] deleted stale/thin cache row', { companyId });
+  } catch {
+    // row may not exist — ignore
+  }
+}
+
 async function getCachedReport(companyId: string): Promise<CockpitReport | null> {
   try {
     const row = await prisma.cockpitCache.findUnique({
@@ -20,10 +38,15 @@ async function getCachedReport(companyId: string): Promise<CockpitReport | null>
     });
 
     if (row === null) return null;
-    if (!isCacheValid(row.updatedAt)) return null;
+    if (!isCacheValid(row.updatedAt)) {
+      await deleteCachedReport(companyId);
+      return null;
+    }
 
     const report = JSON.parse(row.data) as CockpitReport;
-    if (report.fullMemo.includes('Analysis memo not available due to data synthesis error')) {
+
+    if (!isCachedReportUsable(report)) {
+      await deleteCachedReport(companyId);
       return null;
     }
 
